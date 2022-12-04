@@ -1,55 +1,106 @@
 import os
 import sys
 import pandas as pd
+from PIL import Image
+import threading
 
-#抓货号输出list[str]格式的货号
 def ReadItemNum(filename):
     f = pd.read_csv(filename, encoding="ISO-8859-1")
     values = f.iloc[:, 4]
     values = list(values)
     return values
 
-#抓lots号输出list[int]格式的lots
 def ReadLotsNum(filename):
     f = pd.read_csv(filename, encoding="ISO-8859-1")
     keys = f.iloc[:, 0]
     keys = list(keys)
     return keys
 
-#货号的str格式转int
-def ToInt(values):
+def CheckString(values):
     for i in range(len(values)):
-        #取前五个characters转Int
-        values[i] = values[i][0:5]
-        values[i] = int(values[i])
+        values[i] = str(values[i])
+        if values[i][0]==" ":
+            values[i]=values[i][1:]
+        if values[i][-1]==" ":
+            values[i]=values[i][:-1]
+        if values[i][-1]==",":
+            values[i]=values[i][:-1]
     return values
 
-#dictionary用的舒服,转一下
 def ToDictionary(keys, values):
     dictlots = {}
     for i in range(len(keys)):
         dictlots[keys[i]] = values[i]
     return dictlots
 
-#连复制带改名字一步到位
+def ReformatImage(values):
+    for i in values:
+        img = Image.open(i+".jpeg")
+        rgb_img = img.convert('RGB')
+        rgb_img.save(i+".jpg")
+
+def GetThreadList():
+    FileList = os.popen('find /mnt/ProductPicture/AutoDir/ -name *.jpeg')
+    FileList = FileList.read()
+    FileList = FileList.split("\n")
+    for i in range(len(FileList)):
+        FileList[i] = FileList[i][:-4]
+    numberoffile=len(FileList)
+    thread1=numberoffile//3
+    thread2=numberoffile//3*2
+    thread1list=FileList[:thread1]
+    thread2list=FileList[thread1:thread2]
+    thread3list=FileList[thread2:-1]
+    return thread1list,thread2list,thread3list
+
 def MoveFile(dictlots):
+    dictforcsv={}
+    space=""
+    namelist=[]
     for key in dictlots.keys():
-        #跟据lots号定位货号用find命令定位文件夹的绝对路径
-        path = os.system('find /mnt/md0/public/ProductPicture/ -name' + str(dictlots[key]))
-        #检测该文件夹里有多少张图
-        numberofpicture = os.system('ls ' + str(path) + ' | wc -l')
-        numberofpicture = int(numberofpicture)
-        #获取该文件夹所有图片的名字（输出list）
-        filenames = os.system('ls ' + str(path))
-        #用cp命令复制图片到指定文件夹（TARGET_DIR_PATH/）并根据lots号重新命名（cp （find找到的绝对路径）/（图片名字） （指定文件夹/）（lots号_第几张图.jpeg)
-        for num in range(1, numberofpicture+1):
-            os.system('cp ' + str(path) + '/' + str(filenames[num]) + ' ' + 'TARGET_DIR_PATH/' + str(key) + '_' + str(num) + '.jpeg')
-        return "Finish"
-
-
-if __name__ == '__main__':
-    lots = ReadLotsNum(sys.argv(1))
-    items = ToInt(ReadItemNum(sys.argv(1)))
+        path = os.popen('find /mnt/ProductPicture/ -name ' + str(dictlots[key]))
+        path = path.read()
+        path = path.split("\n")
+        path = path[0]
+        print("path: "+path)
+        numberofpicture = os.popen('ls ' + str(path))
+        numberofpicture = numberofpicture.read()
+        numberofpicture = numberofpicture.split("\n")
+        numberofpicture = len(numberofpicture) - 1
+        print("numberofpicture: "+str(numberofpicture))
+        filenames = os.popen('ls ' + str(path))
+        filenames = filenames.read()
+        filenames = filenames.split("\n")
+        filenames = filenames[: -1]
+        for index in range(30):
+            namelist.append(space)
+        dictforcsv[key]=[]
+        for num in range(numberofpicture):
+            os.system("cp " + str(path) + "/" + str(filenames[num]) + " " + "/mnt/ProductPicture/AutoDir/" + str(key) + "_" + str(num+1) + ".jpeg")
+            namelist[num]= str(key)+"_"+str(num+1)+".jpeg"
+        for index in range(30):
+            dictforcsv[key].append(namelist[index])
+        namelist=[]
+    tocsv = pd.DataFrame(dictforcsv)
+    data = tocsv.values
+    data = list(map(list,zip(*data)))
+    data = pd.DataFrame(data)
+    data.to_csv("/mnt/ProductPicture/AutoDir/Auto.csv",header=0,index=0)
+def main():
+    lots = ReadLotsNum(sys.argv[1])
+    items = CheckString(ReadItemNum(sys.argv[1]))
     dictionay = {}
     dictionay = ToDictionary(lots, items)
     print(MoveFile(dictionay))
+    thread1list, thread2list, thread3list = GetThreadList()
+    t1 = threading.Thread(target=ReformatImage, args=(thread1list))
+    t2 = threading.Thread(target=ReformatImage, args=(thread2list))
+    t3 = threading.Thread(target=ReformatImage, args=(thread3list))
+    t1.start()
+    t2.start()
+    t3.start()
+    t1.join()
+    t2.join()
+    t3.join()
+if __name__ == '__main__':
+    main()
